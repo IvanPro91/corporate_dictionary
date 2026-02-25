@@ -1,27 +1,29 @@
-﻿let dictionary = [];
-
+let dictionary = [];
 
 function loadDictionary() {
   chrome.runtime.sendMessage({ action: 'getDictionary' }, function(response) {
     if (response && response.dictionary) {
       dictionary = response.dictionary;
+      console.log('Dictionary loaded in content script:', dictionary.length, 'words');
       applyReplacements();
+    } else {
+      console.log('Failed to load dictionary');
     }
   });
 }
 
-
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   if (request.action === 'dictionaryUpdated') {
     dictionary = request.dictionary;
+    console.log('Dictionary updated, reapplying...');
     applyReplacements();
     sendResponse({ received: true });
+    return true;
   }
   
   if (request.action === 'searchOnPage') {
     const term = request.term.toLowerCase();
     const matches = [];
-    
     
     const walker = document.createTreeWalker(
       document.body,
@@ -43,13 +45,10 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     while (walker.nextNode()) {
       const text = walker.currentNode.nodeValue;
       if (text.toLowerCase().includes(term)) {
-        
         const index = text.toLowerCase().indexOf(term);
         const start = Math.max(0, index - 30);
         const end = Math.min(text.length, index + term.length + 30);
         let context = text.substring(start, end);
-        
-        
         context = context.replace(/\s+/g, ' ').trim();
         
         matches.push({
@@ -62,12 +61,16 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     }
 
     sendResponse({ matches: matches });
-    return true; 
+    return true;
+  }
+
+  if (request.action === 'ping') {
+    sendResponse({ pong: true });
+    return true;
   }
   
-  return true;
+  return false;
 });
-
 
 function applyReplacements() {
   if (!dictionary || dictionary.length === 0) return;
@@ -77,6 +80,8 @@ function applyReplacements() {
   );
 
   if (activeTerms.length === 0) return;
+
+  console.log('Applying replacements for', activeTerms.length, 'terms');
 
   function processNode(node) {
     if (node.nodeType === 3) {
@@ -94,8 +99,8 @@ function applyReplacements() {
         let modifiedText = text;
         
         activeTerms.forEach(term => {
-          
-          const regex = new RegExp('\\b' + term.term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
+          const escapedTerm = term.term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const regex = new RegExp('\\b' + escapedTerm + '\\b', 'gi');
           
           if (regex.test(modifiedText)) {
             regex.lastIndex = 0;
@@ -128,7 +133,6 @@ function applyReplacements() {
   processNode(document.body);
   addStyles();
 }
-
 
 function addStyles() {
   if (document.querySelector('#dictionary-styles')) return;
@@ -208,7 +212,6 @@ function addStyles() {
   document.head.appendChild(style);
 }
 
-
 const observer = new MutationObserver((mutations) => {
   let shouldProcess = false;
   
@@ -227,7 +230,6 @@ observer.observe(document.body, {
   childList: true,
   subtree: true
 });
-
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', loadDictionary);
